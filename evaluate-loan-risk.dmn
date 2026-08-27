@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_0pepiyq" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.49.0" modeler:executionPlatform="Camunda Platform" modeler:executionPlatformVersion="7.24.0">
+  <decision id="Decision_12qrd7p" name="evaluate-loan-risk">
+    <decisionTable id="DecisionTable_1579m4c">
+      <input id="Input_1">
+        <inputExpression id="InputExpression_1" typeRef="integer">
+          <text>creditScore</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_02q1anp">
+        <inputExpression id="LiteralExpression_1tqtfhz" typeRef="double">
+          <text>loanAmount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="riskTier" typeRef="string" />
+      <output id="OutputClause_1bovi9b" label="requiresManualReview" typeRef="boolean" />
+      <rule id="DecisionRule_1tdik2i">
+        <inputEntry id="UnaryTests_1mx8j07">
+          <text>&gt;= 750</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0vh34pz">
+          <text>&lt;= 50000</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0evb8ei">
+          <text>"LOW"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1igo75b">
+          <text> false</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_177tq93">
+        <inputEntry id="UnaryTests_164e6fc">
+          <text>&gt;= 750</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1i5v7if">
+          <text>&gt; 50000</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_06gnu91">
+          <text>"MEDIUM"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1etjrm9">
+          <text> true</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0pbl90q">
+        <inputEntry id="UnaryTests_0a9g6v8">
+          <text>[600..749]</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1ttihir">
+          <text>-</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1nk8jf5">
+          <text>"MEDIUM"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1j0vyab">
+          <text> true</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1f44ftc">
+        <inputEntry id="UnaryTests_0mcyfpq">
+          <text>&lt; 600</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0540znd">
+          <text>-</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0h2rp64">
+          <text>"HIGH"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1llbg0e">
+          <text> false</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape id="Decision_12qrd7p_di" dmnElementRef="Decision_12qrd7p">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>
