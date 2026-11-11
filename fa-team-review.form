@@ -1,0 +1,66 @@
+{
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.6.0",
+  "schemaVersion": 16,
+  "id": "fa-team-review",
+  "type": "default",
+  "components": [
+    {
+      "type": "text",
+      "id": "Field_heading",
+      "text": "## Team review\nCheck the team below, then approve or reject it. Remarks are sent to the team members."
+    },
+    {
+      "type": "text",
+      "id": "Field_teamSummary",
+      "text": "**Team name:** {{registration.teamName}}\n\n**Team type:** {{registration.source}}"
+    },
+    {
+      "type": "table",
+      "id": "Field_members",
+      "label": "Team members",
+      "dataSource": "=registration.members",
+      "rowCount": 10,
+      "columns": [
+        {
+          "label": "Reg. no.",
+          "key": "regNo"
+        },
+        {
+          "label": "Name",
+          "key": "name"
+        },
+        {
+          "label": "Email",
+          "key": "email"
+        }
+      ]
+    },
+    {
+      "type": "radio",
+      "id": "Field_decision",
+      "label": "Decision",
+      "key": "decision",
+      "values": [
+        {
+          "label": "Approve",
+          "value": "APPROVED"
+        },
+        {
+          "label": "Reject",
+          "value": "REJECTED"
+        }
+      ],
+      "validate": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "Field_remarks",
+      "label": "Remarks",
+      "key": "faRemarks",
+      "description": "Required when rejecting, so the team knows what to fix."
+    }
+  ]
+}

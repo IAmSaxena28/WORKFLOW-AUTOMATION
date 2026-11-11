@@ -1,0 +1,575 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_EventTeamRegistration" targetNamespace="http://bpmn.io/schema/bpmn" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.6.0">
+  <bpmn:collaboration id="Collaboration_EventTeamRegistration">
+    <bpmn:participant id="Participant_Registration" name="Event Team Registration" processRef="event-team-registration" />
+    <bpmn:participant id="Participant_Allocation" name="Random Team Allocation" processRef="random-team-allocation" />
+  </bpmn:collaboration>
+  <bpmn:message id="Message_RegistrationClosed" name="registration-closed" />
+  <bpmn:process id="event-team-registration" name="Event Team Registration" isExecutable="true">
+    <bpmn:documentation>One instance per registration request: a self-formed team, an individual student, or a randomly generated team (started by Random Team Allocation). Start variable: registration {registrationId, eventId, mode: TEAM|INDIVIDUAL, source: SELF_FORMED|RANDOM, teamName, members[{regNo,name,email}], faId, faEmail}.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_event_team_registration">
+      <bpmn:lane id="Lane_Student" name="Student">
+        <bpmn:flowNodeRef>StartEvent_RegistrationSubmitted</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_System" name="System (backend job workers)">
+        <bpmn:flowNodeRef>Task_ValidateRegistration</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_RegistrationValid</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_NotifyInvalid</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_RegistrationInvalid</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_HasTeam</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_AddToPool</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_WaitingForAllocation</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_RemindFA</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_ReminderSent</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_SaveApprovedTeam</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_NotifyApproved</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_TeamRegistered</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_RecordRejection</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_NotifyRejected</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_TeamRejected</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_FA" name="Faculty Advisor">
+        <bpmn:flowNodeRef>Task_FAReview</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Timer_FAReminder</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_FADecision</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="StartEvent_RegistrationSubmitted" name="Registration submitted">
+      <bpmn:outgoing>Flow_Submitted</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_ValidateRegistration" name="Validate registration">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="validate-registration" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Submitted</bpmn:incoming>
+      <bpmn:outgoing>Flow_Validated</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_RegistrationValid" name="Registration valid?" default="Flow_Invalid">
+      <bpmn:incoming>Flow_Validated</bpmn:incoming>
+      <bpmn:outgoing>Flow_Valid</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Invalid</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sendTask id="Task_NotifyInvalid" name="Notify student: registration invalid">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-notification" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="template" value="REGISTRATION_INVALID" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Invalid</bpmn:incoming>
+      <bpmn:outgoing>Flow_InvalidNotified</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="EndEvent_RegistrationInvalid" name="Registration invalid">
+      <bpmn:incoming>Flow_InvalidNotified</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="Gateway_HasTeam" name="Has a team?" default="Flow_NoTeam">
+      <bpmn:incoming>Flow_Valid</bpmn:incoming>
+      <bpmn:outgoing>Flow_NoTeam</bpmn:outgoing>
+      <bpmn:outgoing>Flow_HasTeam</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_AddToPool" name="Add student to unallocated pool">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="add-to-unallocated-pool" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_NoTeam</bpmn:incoming>
+      <bpmn:outgoing>Flow_Pooled</bpmn:outgoing>
+      <bpmn:dataOutputAssociation id="DataOutputAssociation_AddToPool">
+        <bpmn:targetRef>DataStore_RegistrationDB_A</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="EndEvent_WaitingForAllocation" name="Waiting for random allocation">
+      <bpmn:incoming>Flow_Pooled</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="Task_FAReview" name="Review team details">
+      <bpmn:extensionElements>
+        <zeebe:userTask />
+        <zeebe:assignmentDefinition candidateGroups="faculty-advisors" />
+        <zeebe:formDefinition formId="fa-team-review" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_HasTeam</bpmn:incoming>
+      <bpmn:outgoing>Flow_Reviewed</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:boundaryEvent id="Timer_FAReminder" name="24 h without a decision" cancelActivity="false" attachedToRef="Task_FAReview">
+      <bpmn:outgoing>Flow_ReminderDue</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDefinition_Timer_FAReminder">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT24H</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:sendTask id="Task_RemindFA" name="Send reminder to FA">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-notification" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="template" value="FA_REMINDER" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ReminderDue</bpmn:incoming>
+      <bpmn:outgoing>Flow_ReminderSent</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="EndEvent_ReminderSent" name="Reminder sent">
+      <bpmn:incoming>Flow_ReminderSent</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="Gateway_FADecision" name="FA decision?" default="Flow_Rejected">
+      <bpmn:incoming>Flow_Reviewed</bpmn:incoming>
+      <bpmn:outgoing>Flow_Approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Rejected</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_SaveApprovedTeam" name="Save team to Approved Teams DB">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="save-approved-team" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Approved</bpmn:incoming>
+      <bpmn:outgoing>Flow_Saved</bpmn:outgoing>
+      <bpmn:dataOutputAssociation id="DataOutputAssociation_SaveApproved">
+        <bpmn:targetRef>DataStore_ApprovedTeamsDB</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="Task_NotifyApproved" name="Notify team: approved">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-notification" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="template" value="TEAM_APPROVED" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Saved</bpmn:incoming>
+      <bpmn:outgoing>Flow_ApprovedNotified</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="EndEvent_TeamRegistered" name="Team registered">
+      <bpmn:incoming>Flow_ApprovedNotified</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_RecordRejection" name="Record rejection">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="record-rejection" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Rejected</bpmn:incoming>
+      <bpmn:outgoing>Flow_RejectionRecorded</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="Task_NotifyRejected" name="Notify team: rejected with remarks">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-notification" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="template" value="TEAM_REJECTED" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_RejectionRecorded</bpmn:incoming>
+      <bpmn:outgoing>Flow_RejectedNotified</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="EndEvent_TeamRejected" name="Team rejected">
+      <bpmn:incoming>Flow_RejectedNotified</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Submitted" sourceRef="StartEvent_RegistrationSubmitted" targetRef="Task_ValidateRegistration" />
+    <bpmn:sequenceFlow id="Flow_Validated" sourceRef="Task_ValidateRegistration" targetRef="Gateway_RegistrationValid" />
+    <bpmn:sequenceFlow id="Flow_Valid" name="yes" sourceRef="Gateway_RegistrationValid" targetRef="Gateway_HasTeam">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=valid = true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Invalid" name="no" sourceRef="Gateway_RegistrationValid" targetRef="Task_NotifyInvalid" />
+    <bpmn:sequenceFlow id="Flow_InvalidNotified" sourceRef="Task_NotifyInvalid" targetRef="EndEvent_RegistrationInvalid" />
+    <bpmn:sequenceFlow id="Flow_NoTeam" name="no" sourceRef="Gateway_HasTeam" targetRef="Task_AddToPool" />
+    <bpmn:sequenceFlow id="Flow_Pooled" sourceRef="Task_AddToPool" targetRef="EndEvent_WaitingForAllocation" />
+    <bpmn:sequenceFlow id="Flow_HasTeam" name="yes" sourceRef="Gateway_HasTeam" targetRef="Task_FAReview">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=registration.mode = "TEAM"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Reviewed" sourceRef="Task_FAReview" targetRef="Gateway_FADecision" />
+    <bpmn:sequenceFlow id="Flow_Approved" name="approved" sourceRef="Gateway_FADecision" targetRef="Task_SaveApprovedTeam">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=decision = "APPROVED"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Saved" sourceRef="Task_SaveApprovedTeam" targetRef="Task_NotifyApproved" />
+    <bpmn:sequenceFlow id="Flow_ApprovedNotified" sourceRef="Task_NotifyApproved" targetRef="EndEvent_TeamRegistered" />
+    <bpmn:sequenceFlow id="Flow_Rejected" name="rejected" sourceRef="Gateway_FADecision" targetRef="Task_RecordRejection" />
+    <bpmn:sequenceFlow id="Flow_RejectionRecorded" sourceRef="Task_RecordRejection" targetRef="Task_NotifyRejected" />
+    <bpmn:sequenceFlow id="Flow_RejectedNotified" sourceRef="Task_NotifyRejected" targetRef="EndEvent_TeamRejected" />
+    <bpmn:sequenceFlow id="Flow_ReminderDue" sourceRef="Timer_FAReminder" targetRef="Task_RemindFA" />
+    <bpmn:sequenceFlow id="Flow_ReminderSent" sourceRef="Task_RemindFA" targetRef="EndEvent_ReminderSent" />
+    <bpmn:dataStoreReference id="DataStore_RegistrationDB_A" name="Registration DB" />
+    <bpmn:dataStoreReference id="DataStore_ApprovedTeamsDB" name="Approved Teams DB" />
+    <bpmn:textAnnotation id="TextAnnotation_StartedBy">
+      <bpmn:text>Started by the web app (self-formed team or individual student) or by Random Team Allocation (random team)</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_StartedBy" sourceRef="StartEvent_RegistrationSubmitted" targetRef="TextAnnotation_StartedBy" />
+    <bpmn:textAnnotation id="TextAnnotation_RandomRejected">
+      <bpmn:text>Rejected random team: its members go back to the unallocated pool and are picked up by the next allocation round</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_RandomRejected" sourceRef="Task_RecordRejection" targetRef="TextAnnotation_RandomRejected" />
+  </bpmn:process>
+  <bpmn:process id="random-team-allocation" name="Random Team Allocation" isExecutable="true">
+    <bpmn:documentation>One instance per event, started by the message 'registration-closed' (variables: eventId, teamSize). Groups unallocated students into random teams and sends each team through Event Team Registration for FA confirmation.</bpmn:documentation>
+    <bpmn:startEvent id="StartEvent_RegistrationClosed" name="Registration closed">
+      <bpmn:outgoing>Flow_Closed</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageEventDefinition_StartEvent_RegistrationClosed" messageRef="Message_RegistrationClosed" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_FetchUnallocated" name="Fetch unallocated students">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="fetch-unallocated-students" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Closed</bpmn:incoming>
+      <bpmn:incoming>Flow_RecheckPool</bpmn:incoming>
+      <bpmn:outgoing>Flow_Fetched</bpmn:outgoing>
+      <bpmn:property id="Property_Task_FetchUnallocated" name="__targetRef_placeholder" />
+      <bpmn:dataInputAssociation id="DataInputAssociation_FetchUnallocated">
+        <bpmn:sourceRef>DataStore_RegistrationDB_B</bpmn:sourceRef>
+        <bpmn:targetRef>Property_Task_FetchUnallocated</bpmn:targetRef>
+      </bpmn:dataInputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_AnyStudentsLeft" name="Students without a team?" default="Flow_NoneLeft">
+      <bpmn:incoming>Flow_Fetched</bpmn:incoming>
+      <bpmn:outgoing>Flow_StudentsLeft</bpmn:outgoing>
+      <bpmn:outgoing>Flow_NoneLeft</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_AllocateRandomTeams" name="Randomly allocate students into teams">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="allocate-random-teams" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_StudentsLeft</bpmn:incoming>
+      <bpmn:outgoing>Flow_Allocated</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:callActivity id="CallActivity_RegisterRandomTeam" name="Register each random team (FA confirmation)">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="event-team-registration" propagateAllChildVariables="false" propagateAllParentVariables="false" />
+        <zeebe:ioMapping>
+          <zeebe:input source="=randomTeam" target="registration" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Allocated</bpmn:incoming>
+      <bpmn:outgoing>Flow_RecheckPool</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="=generatedTeams" inputElement="randomTeam" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+    </bpmn:callActivity>
+    <bpmn:endEvent id="EndEvent_AllStudentsPlaced" name="All students placed">
+      <bpmn:incoming>Flow_NoneLeft</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Closed" sourceRef="StartEvent_RegistrationClosed" targetRef="Task_FetchUnallocated" />
+    <bpmn:sequenceFlow id="Flow_Fetched" sourceRef="Task_FetchUnallocated" targetRef="Gateway_AnyStudentsLeft" />
+    <bpmn:sequenceFlow id="Flow_StudentsLeft" name="yes" sourceRef="Gateway_AnyStudentsLeft" targetRef="Task_AllocateRandomTeams">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=unallocatedCount &gt; 0</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_NoneLeft" name="no" sourceRef="Gateway_AnyStudentsLeft" targetRef="EndEvent_AllStudentsPlaced" />
+    <bpmn:sequenceFlow id="Flow_Allocated" sourceRef="Task_AllocateRandomTeams" targetRef="CallActivity_RegisterRandomTeam" />
+    <bpmn:sequenceFlow id="Flow_RecheckPool" name="all FA decisions received: re-check the pool" sourceRef="CallActivity_RegisterRandomTeam" targetRef="Task_FetchUnallocated" />
+    <bpmn:dataStoreReference id="DataStore_RegistrationDB_B" name="Registration DB" />
+    <bpmn:textAnnotation id="TextAnnotation_CallActivity">
+      <bpmn:text>Call activity, parallel multi-instance: starts 'Event Team Registration' once per generated team (mode = TEAM, source = RANDOM)</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_CallActivity" sourceRef="CallActivity_RegisterRandomTeam" targetRef="TextAnnotation_CallActivity" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_EventTeamRegistration">
+      <bpmndi:BPMNShape id="Participant_Registration_di" bpmnElement="Participant_Registration" isHorizontal="true">
+        <dc:Bounds x="160" y="80" width="1360" height="730" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Participant_Allocation_di" bpmnElement="Participant_Allocation" isHorizontal="true">
+        <dc:Bounds x="160" y="850" width="1360" height="270" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Student_di" bpmnElement="Lane_Student" isHorizontal="true">
+        <dc:Bounds x="190" y="80" width="1330" height="140" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="190" y="220" width="1330" height="410" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_FA_di" bpmnElement="Lane_FA" isHorizontal="true">
+        <dc:Bounds x="190" y="630" width="1330" height="180" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_RegistrationSubmitted_di" bpmnElement="StartEvent_RegistrationSubmitted">
+        <dc:Bounds x="242" y="142" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="213" y="183" width="94" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ValidateRegistration_di" bpmnElement="Task_ValidateRegistration">
+        <dc:Bounds x="320" y="260" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_RegistrationValid_di" bpmnElement="Gateway_RegistrationValid" isMarkerVisible="true">
+        <dc:Bounds x="485" y="275" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="458" y="246" width="104" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_NotifyInvalid_di" bpmnElement="Task_NotifyInvalid">
+        <dc:Bounds x="450" y="390" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_RegistrationInvalid_di" bpmnElement="EndEvent_RegistrationInvalid">
+        <dc:Bounds x="607" y="412" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="574" y="453" width="102" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_HasTeam_di" bpmnElement="Gateway_HasTeam" isMarkerVisible="true">
+        <dc:Bounds x="675" y="275" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="666" y="246" width="68" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AddToPool_di" bpmnElement="Task_AddToPool">
+        <dc:Bounds x="790" y="260" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_WaitingForAllocation_di" bpmnElement="EndEvent_WaitingForAllocation">
+        <dc:Bounds x="947" y="282" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="923" y="323" width="84" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_FAReview_di" bpmnElement="Task_FAReview">
+        <dc:Bounds x="790" y="680" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Timer_FAReminder_di" bpmnElement="Timer_FAReminder">
+        <dc:Bounds x="832" y="662" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="866" y="641" width="122" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RemindFA_di" bpmnElement="Task_RemindFA">
+        <dc:Bounds x="790" y="520" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_ReminderSent_di" bpmnElement="EndEvent_ReminderSent">
+        <dc:Bounds x="942" y="542" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="925" y="583" width="70" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_FADecision_di" bpmnElement="Gateway_FADecision" isMarkerVisible="true">
+        <dc:Bounds x="995" y="695" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="986" y="752" width="68" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_SaveApprovedTeam_di" bpmnElement="Task_SaveApprovedTeam">
+        <dc:Bounds x="1100" y="520" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_NotifyApproved_di" bpmnElement="Task_NotifyApproved">
+        <dc:Bounds x="1260" y="520" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_TeamRegistered_di" bpmnElement="EndEvent_TeamRegistered">
+        <dc:Bounds x="1422" y="542" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1400" y="583" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RecordRejection_di" bpmnElement="Task_RecordRejection">
+        <dc:Bounds x="1100" y="260" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_NotifyRejected_di" bpmnElement="Task_NotifyRejected">
+        <dc:Bounds x="1260" y="260" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_TeamRejected_di" bpmnElement="EndEvent_TeamRejected">
+        <dc:Bounds x="1422" y="282" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1405" y="323" width="70" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_RegistrationClosed_di" bpmnElement="StartEvent_RegistrationClosed">
+        <dc:Bounds x="242" y="942" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="213" y="983" width="94" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_FetchUnallocated_di" bpmnElement="Task_FetchUnallocated">
+        <dc:Bounds x="330" y="920" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_AnyStudentsLeft_di" bpmnElement="Gateway_AnyStudentsLeft" isMarkerVisible="true">
+        <dc:Bounds x="505" y="935" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="465" y="906" width="130" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AllocateRandomTeams_di" bpmnElement="Task_AllocateRandomTeams">
+        <dc:Bounds x="630" y="920" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="CallActivity_RegisterRandomTeam_di" bpmnElement="CallActivity_RegisterRandomTeam">
+        <dc:Bounds x="800" y="920" width="160" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_AllStudentsPlaced_di" bpmnElement="EndEvent_AllStudentsPlaced">
+        <dc:Bounds x="622" y="1042" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="593" y="1083" width="94" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="DataStore_RegistrationDB_A_di" bpmnElement="DataStore_RegistrationDB_A">
+        <dc:Bounds x="825" y="400" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="811" y="454" width="78" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="DataStore_ApprovedTeamsDB_di" bpmnElement="DataStore_ApprovedTeamsDB">
+        <dc:Bounds x="1135" y="415" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1066" y="426" width="62" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="DataStore_RegistrationDB_B_di" bpmnElement="DataStore_RegistrationDB_B">
+        <dc:Bounds x="365" y="1040" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="424" y="1058" width="78" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_StartedBy_di" bpmnElement="TextAnnotation_StartedBy">
+        <dc:Bounds x="300" y="92" width="420" height="41" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_RandomRejected_di" bpmnElement="TextAnnotation_RandomRejected">
+        <dc:Bounds x="1280" y="392" width="225" height="55" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_CallActivity_di" bpmnElement="TextAnnotation_CallActivity">
+        <dc:Bounds x="1040" y="1008" width="340" height="55" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Submitted_di" bpmnElement="Flow_Submitted">
+        <di:waypoint x="278" y="160" />
+        <di:waypoint x="380" y="160" />
+        <di:waypoint x="380" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Validated_di" bpmnElement="Flow_Validated">
+        <di:waypoint x="440" y="300" />
+        <di:waypoint x="485" y="300" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Valid_di" bpmnElement="Flow_Valid">
+        <di:waypoint x="535" y="300" />
+        <di:waypoint x="675" y="300" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="548" y="282" width="18" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Invalid_di" bpmnElement="Flow_Invalid">
+        <di:waypoint x="510" y="325" />
+        <di:waypoint x="510" y="390" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="518" y="345" width="14" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_InvalidNotified_di" bpmnElement="Flow_InvalidNotified">
+        <di:waypoint x="570" y="430" />
+        <di:waypoint x="607" y="430" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_NoTeam_di" bpmnElement="Flow_NoTeam">
+        <di:waypoint x="725" y="300" />
+        <di:waypoint x="790" y="300" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="738" y="282" width="14" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Pooled_di" bpmnElement="Flow_Pooled">
+        <di:waypoint x="910" y="300" />
+        <di:waypoint x="947" y="300" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_HasTeam_di" bpmnElement="Flow_HasTeam">
+        <di:waypoint x="700" y="325" />
+        <di:waypoint x="700" y="720" />
+        <di:waypoint x="790" y="720" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="708" y="345" width="18" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Reviewed_di" bpmnElement="Flow_Reviewed">
+        <di:waypoint x="910" y="720" />
+        <di:waypoint x="995" y="720" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Approved_di" bpmnElement="Flow_Approved">
+        <di:waypoint x="1045" y="720" />
+        <di:waypoint x="1160" y="720" />
+        <di:waypoint x="1160" y="600" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1058" y="702" width="50" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Saved_di" bpmnElement="Flow_Saved">
+        <di:waypoint x="1220" y="560" />
+        <di:waypoint x="1260" y="560" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ApprovedNotified_di" bpmnElement="Flow_ApprovedNotified">
+        <di:waypoint x="1380" y="560" />
+        <di:waypoint x="1422" y="560" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Rejected_di" bpmnElement="Flow_Rejected">
+        <di:waypoint x="1020" y="695" />
+        <di:waypoint x="1020" y="300" />
+        <di:waypoint x="1100" y="300" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1028" y="664" width="44" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_RejectionRecorded_di" bpmnElement="Flow_RejectionRecorded">
+        <di:waypoint x="1220" y="300" />
+        <di:waypoint x="1260" y="300" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_RejectedNotified_di" bpmnElement="Flow_RejectedNotified">
+        <di:waypoint x="1380" y="300" />
+        <di:waypoint x="1422" y="300" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ReminderDue_di" bpmnElement="Flow_ReminderDue">
+        <di:waypoint x="850" y="662" />
+        <di:waypoint x="850" y="600" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ReminderSent_di" bpmnElement="Flow_ReminderSent">
+        <di:waypoint x="910" y="560" />
+        <di:waypoint x="942" y="560" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Closed_di" bpmnElement="Flow_Closed">
+        <di:waypoint x="278" y="960" />
+        <di:waypoint x="330" y="960" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Fetched_di" bpmnElement="Flow_Fetched">
+        <di:waypoint x="450" y="960" />
+        <di:waypoint x="505" y="960" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_StudentsLeft_di" bpmnElement="Flow_StudentsLeft">
+        <di:waypoint x="555" y="960" />
+        <di:waypoint x="630" y="960" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="568" y="942" width="18" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_NoneLeft_di" bpmnElement="Flow_NoneLeft">
+        <di:waypoint x="530" y="985" />
+        <di:waypoint x="530" y="1060" />
+        <di:waypoint x="622" y="1060" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="538" y="1005" width="14" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Allocated_di" bpmnElement="Flow_Allocated">
+        <di:waypoint x="750" y="960" />
+        <di:waypoint x="800" y="960" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_RecheckPool_di" bpmnElement="Flow_RecheckPool">
+        <di:waypoint x="960" y="960" />
+        <di:waypoint x="1010" y="960" />
+        <di:waypoint x="1010" y="882" />
+        <di:waypoint x="390" y="882" />
+        <di:waypoint x="390" y="920" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="575" y="864" width="240" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="DataOutputAssociation_AddToPool_di" bpmnElement="DataOutputAssociation_AddToPool">
+        <di:waypoint x="850" y="340" />
+        <di:waypoint x="850" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="DataOutputAssociation_SaveApproved_di" bpmnElement="DataOutputAssociation_SaveApproved">
+        <di:waypoint x="1160" y="520" />
+        <di:waypoint x="1160" y="465" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="DataInputAssociation_FetchUnallocated_di" bpmnElement="DataInputAssociation_FetchUnallocated">
+        <di:waypoint x="390" y="1040" />
+        <di:waypoint x="390" y="1000" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_StartedBy_di" bpmnElement="Association_StartedBy">
+        <di:waypoint x="273" y="147" />
+        <di:waypoint x="300" y="126" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_RandomRejected_di" bpmnElement="Association_RandomRejected">
+        <di:waypoint x="1200" y="340" />
+        <di:waypoint x="1280" y="402" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_CallActivity_di" bpmnElement="Association_CallActivity">
+        <di:waypoint x="940" y="1000" />
+        <di:waypoint x="1040" y="1030" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
